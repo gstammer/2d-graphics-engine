@@ -3,13 +3,14 @@
  */
 
 #include "image.h"
-#include "GCanvas.h"
-#include "GBitmap.h"
-#include "GColor.h"
-#include "GPoint.h"
-#include "GRandom.h"
-#include "GRect.h"
+#include "../include/GCanvas.h"
+#include "../include/GBitmap.h"
+#include "../include/GColor.h"
+#include "../include/GPoint.h"
+#include "../include/GRandom.h"
+#include "../include/GRect.h"
 #include <string>
+
 
 static void draw_solid_ramp(GCanvas* canvas) {
     const float c = 1.0 / 512;
@@ -33,7 +34,7 @@ static void draw_solid_ramp(GCanvas* canvas) {
         GColor delta = rec[y].fDC;
         for (int x = 0; x < 256; x++) {
             const GRect rect = GRect::XYWH(x, y * 28, 1, 28);
-            canvas->fillRect(rect, color);
+            canvas->drawRect(rect, color);
             color += delta;
         }
     }
@@ -48,7 +49,7 @@ static void draw_blend_ramp(GCanvas* canvas, const GColor& bg) {
         float g = fabs(cos(i/40.0));
         float b = fabs(sin(i/50.0));
         GColor color = {r, g, b, 0.3f};
-        canvas->fillRect(rect, color);
+        canvas->drawRect(rect, color);
         rect = rect.makeOffset(delta, delta);
     }
 }
@@ -76,7 +77,7 @@ static void graph_rects(GCanvas* canvas, const Graph& g,
         }
         r.fLeft += 0.5;
         r.fRight -= 0.5f;
-        canvas->fillRect(r, color((x - g.fMin) / (g.fMax - g.fMin)));
+        canvas->drawRect(r, color((x - g.fMin) / (g.fMax - g.fMin)));
         x += dx;
     }
 }

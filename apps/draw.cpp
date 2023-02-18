@@ -3,11 +3,11 @@
  */
 
 #include "GWindow.h"
-#include "GBitmap.h"
-#include "GCanvas.h"
-#include "GColor.h"
-#include "GRandom.h"
-#include "GRect.h"
+#include "../include/GBitmap.h"
+#include "../include/GCanvas.h"
+#include "../include/GColor.h"
+#include "../include/GRandom.h"
+#include "../include/GRect.h"
 
 #include <vector>
 
@@ -25,7 +25,7 @@ template <typename T> int find_index(const std::vector<T*>& list, T* target) {
 static GRandom gRand;
 
 static GColor rand_color() {
-    return {gRand.nextF(), gRand.nextF(), gRand.nextF(), 0.5f};
+    return GColor::RGBA(gRand.nextF(), gRand.nextF(), gRand.nextF(), 0.5f);
 }
 
 static GRect make_from_pts(const GPoint& p0, const GPoint& p1) {
@@ -50,29 +50,29 @@ static bool hit_test(float x0, float y0, float x1, float y1) {
 
 static bool in_resize_corner(const GRect& r, float x, float y, GPoint* anchor) {
     if (hit_test(r.left(), r.top(), x, y)) {
-        anchor->set(r.right(), r.bottom());
+        *anchor = { r.right(), r.bottom() };
         return true;
     } else if (hit_test(r.right(), r.top(), x, y)) {
-        anchor->set(r.left(), r.bottom());
+        *anchor = { r.left(), r.bottom() };
         return true;
     } else if (hit_test(r.right(), r.bottom(), x, y)) {
-        anchor->set(r.left(), r.top());
+        *anchor = { r.left(), r.top() };
         return true;
     } else if (hit_test(r.left(), r.bottom(), x, y)) {
-        anchor->set(r.right(), r.top());
+        *anchor = { r.right(), r.top() };
         return true;
     }
     return false;
 }
 
 static void draw_corner(GCanvas* canvas, const GColor& c, float x, float y, float dx, float dy) {
-    canvas->fillRect(make_from_pts({x, y - 1}, {x + dx, y + 1}), c);
-    canvas->fillRect(make_from_pts({x - 1, y}, {x + 1, y + dy}), c);
+    canvas->drawRect(make_from_pts({x, y - 1}, {x + dx, y + 1}), c);
+    canvas->drawRect(make_from_pts({x - 1, y}, {x + 1, y + dy}), c);
 }
 
 static void draw_hilite(GCanvas* canvas, const GRect& r) {
     const float size = CORNER_SIZE;
-    GColor c = {0, 0, 0, 1};
+    GColor c = GColor::RGB(0, 0, 0);
     draw_corner(canvas, c, r.fLeft, r.fTop, size, size);
     draw_corner(canvas, c, r.fLeft, r.fBottom, size, -size);
     draw_corner(canvas, c, r.fRight, r.fTop, -size, size);
@@ -80,10 +80,10 @@ static void draw_hilite(GCanvas* canvas, const GRect& r) {
 }
 
 static void constrain_color(GColor* c) {
-    c->a = std::max(std::min(c->a, 1.f), 0.1f);
     c->r = std::max(std::min(c->r, 1.f), 0.f);
     c->g = std::max(std::min(c->g, 1.f), 0.f);
     c->b = std::max(std::min(c->b, 1.f), 0.f);
+    c->a = std::max(std::min(c->a, 1.f), 0.1f);
 }
 
 class Shape {
@@ -103,7 +103,7 @@ public:
     }
 
     virtual void draw(GCanvas* canvas) {
-        canvas->fillRect(fRect, fColor);
+        canvas->drawRect(fRect, fColor);
     }
 
     virtual GRect getRect() { return fRect; }
@@ -116,6 +116,53 @@ private:
     GColor  fColor;
 };
 
+static void make_regular_poly(GPoint pts[], int count, float cx, float cy, float rx, float ry) {
+    float angle = 0;
+    const float deltaAngle = M_PI * 2 / count;
+
+    for (int i = 0; i < count; ++i) {
+        pts[i] = {cx + cos(angle) * rx, cy + sin(angle) * ry};
+        angle += deltaAngle;
+    }
+}
+
+class ConvexShape : public Shape {
+public:
+    ConvexShape(GColor c, int sides) : fPaint(c), fN(sides) {
+        fBounds = GRect::XYWH(100, 100, 150, 150);
+    }
+
+    void draw(GCanvas* canvas) override {
+        float sx = fBounds.width() * 0.5f;
+        float sy = fBounds.height() * 0.5f;
+        float cx = (fBounds.left() + fBounds.right()) * 0.5f;
+        float cy = (fBounds.top() + fBounds.bottom()) * 0.5f;
+
+        GPoint* pts = new GPoint[fN];
+        make_regular_poly(pts, fN, cx, cy, sx, sy);
+        canvas->drawConvexPolygon(pts, fN, fPaint);
+        delete[] pts;
+    }
+    
+    GRect getRect() override { return fBounds; }
+    void setRect(const GRect& r) override { fBounds = r; }
+    GColor getColor() override { return fPaint.getColor(); }
+    void setColor(const GColor& c) override { fPaint.setColor(c); }
+
+private:
+    GPaint  fPaint;
+    int     fN;
+    GRect   fBounds;
+};
+
+static Shape* cons_up_shape(unsigned index) {
+    if (index == 0) {
+        int n = (int)(3 + gRand.nextF() * 12);
+        return new ConvexShape(rand_color(), n);
+    }
+    return nullptr;
+}
+
 class TestWindow : public GWindow {
     std::vector<Shape*> fList;
     Shape* fShape;
@@ -123,7 +170,7 @@ class TestWindow : public GWindow {
 
 public:
     TestWindow(int w, int h) : GWindow(w, h) {
-        fBGColor = {1, 1, 1, 1};
+        fBGColor = GColor::RGB(1, 1, 1);
         fShape = NULL;
     }
 
@@ -131,7 +178,7 @@ public:
     
 protected:
     void onDraw(GCanvas* canvas) override {
-        canvas->fillRect(GRect::XYWH(0, 0, 10000, 10000), fBGColor);
+        canvas->drawRect(GRect::XYWH(0, 0, 10000, 10000), fBGColor);
 
         for (int i = 0; i < fList.size(); ++i) {
             fList[i]->draw(canvas);
@@ -142,6 +189,16 @@ protected:
     }
 
     bool onKeyPress(uint32_t sym) override {
+        {
+            Shape* s = cons_up_shape(sym - '1');
+            if (s) {
+                fList.push_back(fShape = s);
+                this->updateTitle();
+                this->requestDraw();
+                return true;
+            }
+        }
+
         if (fShape) {
             switch (sym) {
                 case SDLK_UP: {
@@ -266,7 +323,7 @@ private:
             c = fShape->getColor();
         }
 
-        sprintf(buffer, "R:%02X  G:%02X  B:%02X  A:%02X",
+        snprintf(buffer, sizeof(buffer), "R:%02X  G:%02X  B:%02X  A:%02X",
                 int(c.r * 255), int(c.g * 255), int(c.b * 255), int(c.a * 255));
         this->setTitle(buffer);
     }
@@ -279,3 +336,4 @@ int main(int argc, char const* const* argv) {
 
     return wind->run();
 }
+

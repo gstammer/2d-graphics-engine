@@ -5,7 +5,7 @@
 #include <direct.h>
 #endif
 
-#include "GTypes.h"
+#include "../include/GTypes.h"
 
 bool is_dir(const char path[]) {
     struct stat status;

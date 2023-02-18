@@ -3,9 +3,9 @@
  */
 
 #include "image.h"
-#include "GCanvas.h"
-#include "GColor.h"
-#include "GBitmap.h"
+#include "../include/GCanvas.h"
+#include "../include/GColor.h"
+#include "../include/GBitmap.h"
 #include <string>
 
 static int pixel_diff(GPixel p0, GPixel p1) {
@@ -167,20 +167,15 @@ static void handle_something(FILE* f, const char dir[], int index) {
 static int gPACounts[10] = { 0,0,0,0,0,0,0,0,0,0 };
 static int gDrawCount;
 
-int main(int argc, char** argv) {
+int main_image(int argc, const char* argv[]) {
     bool verbose = false;
     std::string root;
     const char* match = NULL;
     const char* expected = NULL;
     const char* diffDir = NULL;
-    const char* report = NULL;
-    const char* author = NULL;
     const char* scoreFile = nullptr;
-    FILE* reportFile = NULL;
     FILE* diffFile = NULL;
     int tolerance = 0;
-    int targetPA = -1;
-    int oneShot = -1;
 
     const char* collage_dir = nullptr;
     int collage_index = -1;
@@ -193,27 +188,14 @@ int main(int argc, char** argv) {
     }
 
     for (int i = 1; i < argc; ++i) {
-        if (is_arg(argv[i], "report") && i+2 < argc) {
-            report = argv[++i];
-            author = argv[++i];
-            reportFile = fopen(report, "a");
-            if (!reportFile) {
-                printf("----- can't open %s for author %s\n", report, author);
-                return -1;
-            }
-        } else if (is_arg(argv[i], "verbose")) {
+        if (is_arg(argv[i], "verbose")) {
             verbose = true;
-        } else if (is_arg(argv[i], "oneshot") && i+1 < argc) {
-            oneShot = atoi(argv[++i]);
-            assert(oneShot >= 0 && oneShot < gDrawCount);
         } else if (is_arg(argv[i], "write") && i+1 < argc) {
             root = argv[++i];
         } else if (is_arg(argv[i], "match") && i+1 < argc) {
             match = argv[++i];
         } else if (is_arg(argv[i], "expected") && i+1 < argc) {
             expected = argv[++i];
-        } else if (is_arg(argv[i], "pa") && i+1 < argc) {
-            targetPA = atoi(argv[++i]);
         } else if (is_arg(argv[i], "tolerance") && i+1 < argc) {
             tolerance = atoi(argv[++i]);
             assert(tolerance >= 0);
@@ -260,16 +242,13 @@ int main(int argc, char** argv) {
         }
     }
 
-    handle_something(collage_file, collage_dir, collage_index);
-
-    double max_score = (1 << gDrawRecs[gDrawCount - 1].fPA) - 1;
+    if (!match) {
+        handle_something(collage_file, collage_dir, collage_index);
+    }
 
     double percent_correct = 0;
     double counter = 0;
     for (int i = 0; gDrawRecs[i].fDraw; ++i) {
-        if (targetPA > 0 && targetPA != gDrawRecs[i].fPA) {
-            continue;
-        }
         double weight = 1 << (gDrawRecs[i].fPA - 1);
         weight /= gPACounts[gDrawRecs[i].fPA];
 
@@ -283,9 +262,6 @@ int main(int argc, char** argv) {
         }
 
         if (match && !strstr(path.c_str(), match)) {
-            continue;
-        }
-        if (oneShot >= 0 && oneShot != i) {
             continue;
         }
         if (verbose && !something) {
@@ -312,24 +288,6 @@ int main(int argc, char** argv) {
                 double individual_score = correct * weight;
 
                 percent_correct += individual_score;
-
-                if (oneShot == i) {
-                    individual_score = individual_score * 100 / max_score;
-                    if (verbose) {
-                        printf("[%d] score=%g %s\n", i, individual_score, path.c_str());
-                    }
-                    if (scoreFile) {
-                        FILE* f = fopen(scoreFile, "w");
-                        if (f) {
-                            fprintf(f, "%g\n", individual_score);
-                            fclose(f);
-                            return 0;
-                        } else {
-                            printf("FAILED TO WRITE TO %s\n", scoreFile);
-                            return -1;
-                        }
-                    }
-                }
             }
         }
         
@@ -339,14 +297,9 @@ int main(int argc, char** argv) {
         fclose(diffFile);
     }
 
-//    assert(targetPA > 0 || floor(counter + 0.5) == max_score);
-
     int image_score = (int)(percent_correct * 100 / counter + 0.5);
-    if (expected && (oneShot < 0)) {
+    if (expected) {
         printf("           image: %d\n", image_score);
-    }
-    if (reportFile) {
-        fprintf(reportFile, "%s, image, %d\n", author, image_score);
     }
     if (scoreFile) {
         FILE* f = fopen(scoreFile, "w");

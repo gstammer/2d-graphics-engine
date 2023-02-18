@@ -8,8 +8,8 @@
 #include <SDL2/SDL.h>
 #include <functional>
 
-#include "GBitmap.h"
-#include "GPoint.h"
+#include "../include/GBitmap.h"
+#include "../include/GPoint.h"
 
 class GCanvas;
 class GClick;

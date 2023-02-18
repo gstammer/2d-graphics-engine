@@ -2,8 +2,7 @@
  *  Copyright 2015 Mike Reed
  */
 
-#include "GBitmap.h"
-#include "lodepng.h"
+#include "../include/GBitmap.h"
 
 void GBitmap::setIsOpaque(IsOpaque io) {
     switch (io) {
@@ -48,4 +47,3 @@ void GBitmap::alloc(int w, int h, size_t rb) {
                 (w > 0 && h > 0) ? (GPixel*)calloc(h, rb) : nullptr,
                 kNo_IsOpaque);
 }
-

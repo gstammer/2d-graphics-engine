@@ -7,7 +7,7 @@
 
 #include "GTypes.h"
 
-typedef unsigned long GMSec;
+using GMSec = unsigned long;
 
 class GTime {
 public:

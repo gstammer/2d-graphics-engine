@@ -85,6 +85,12 @@ public:
         return GIRect::LTRB(GFloorToInt(fLeft), GFloorToInt(fTop),
                             GCeilToInt(fRight), GCeilToInt(fBottom));
     }
+    
+    static GRect Make(const GIRect& r) {
+        return {
+            (float)r.fLeft, (float)r.fTop, (float)r.fRight, (float)r.fBottom
+        };
+    }
 };
 
 #endif

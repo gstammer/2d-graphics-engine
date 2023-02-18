@@ -2,11 +2,11 @@
  *  Copyright 2021 Mike Reed
  */
 
-#include "GCanvas.h"
-#include "GBitmap.h"
-#include "GColor.h"
-#include "GPoint.h"
-#include "GRect.h"
+#include "../include/GCanvas.h"
+#include "../include/GBitmap.h"
+#include "../include/GColor.h"
+#include "../include/GPoint.h"
+#include "../include/GRect.h"
 #include "tests.h"
 
 static void force_fill_pixels(GBitmap& bm, GPixel pixel) {
@@ -67,7 +67,7 @@ static void test_rect_nodraw(GTestStats* stats) {
         GBitmap bm;
         bm.alloc(3, 3);
         auto canvas = GCreateCanvas(bm);
-        canvas->fillRect(r, color);
+        canvas->drawRect(r, color);
         stats->expectTrue(expect_pixels_value(bm, 0), "rect should not draw");
     }
 }

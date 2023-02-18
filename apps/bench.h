@@ -1,13 +1,11 @@
 /**
  *  Copyright 2016 Mike Reed
- *
- *  590 Introduction to Graphics
  */
 
-#ifndef CS590_bench_DEFINED
-#define CS590_bench_DEFINED
+#ifndef _bench_h_DEFINED
+#define _bench_h_DEFINED
 
-#include "GPoint.h"
+#include "../include/GPoint.h"
 
 class GCanvas;
 

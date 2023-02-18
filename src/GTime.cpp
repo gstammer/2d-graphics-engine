@@ -1,10 +1,8 @@
 /**
  *  Copyright 2013 Mike Reed
- *
- *  COMP 590 -- Fall 2013
  */
 
-#include "GTime.h"
+#include "../include/GTime.h"
 
 #include <sys/time.h>
 

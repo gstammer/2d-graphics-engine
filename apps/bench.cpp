@@ -3,9 +3,9 @@
  */
 
 #include "bench.h"
-#include "GCanvas.h"
-#include "GBitmap.h"
-#include "GTime.h"
+#include "../include/GCanvas.h"
+#include "../include/GBitmap.h"
+#include "../include/GTime.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -34,7 +34,11 @@ static double handle_proc(GBenchmark* bench, const char path[], GBitmap* bitmap,
         return 0;
     }
 
+#ifdef NDEBUG
     int N = 100;
+#else
+    int N = 1;
+#endif
     bool forever = false;
     switch (mode) {
         case kNormal: break;
@@ -80,7 +84,7 @@ static std::vector<double> load_scores(const char filename[], int count) {
     return scores;
 }
 
-int main(int argc, char** argv) {
+int main_bench(int argc, const char* argv[]) {
     Mode mode = kNormal;
     const char* match = nullptr;
     const char* scoreFile = nullptr;

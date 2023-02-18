@@ -3,10 +3,10 @@
  */
 
 #include "GWindow.h"
-#include "GBitmap.h"
-#include "GCanvas.h"
-#include "GRect.h"
-#include "GTime.h"
+#include "../include/GBitmap.h"
+#include "../include/GCanvas.h"
+#include "../include/GRect.h"
+#include "../include/GTime.h"
 #include <stdio.h>
 
 GClick::GClick(GPoint loc, std::function<void(GClick*)> func) : fFunc(func) {
@@ -125,7 +125,7 @@ bool GWindow::handleEvent(const SDL_Event& evt) {
             if (fClick) {
                 fClick->fState = GClick::kMove_State;
                 fClick->fPrev = fClick->fCurr;
-                fClick->fCurr.set(evt.motion.x, evt.motion.y);
+                fClick->fCurr = {evt.motion.x, evt.motion.y};
                 fClick->callback();
                 return true;
             }

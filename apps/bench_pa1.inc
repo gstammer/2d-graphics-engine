@@ -28,7 +28,7 @@ public:
         for (int i = 0; i < N; ++i) {
             GColor color = rand_color(rand, fForceOpaque);
             GRect rect = rand_rect(rand, bounds);
-            canvas->fillRect(rect, color);
+            canvas->drawRect(rect, color);
         }
     }
 };
@@ -47,7 +47,7 @@ public:
         GRandom rand;
         for (int i = 0; i < N; ++i) {
             GColor color = rand_color(rand);
-            canvas->fillRect(fRect, color);
+            canvas->drawRect(fRect, color);
         }
     }
 };

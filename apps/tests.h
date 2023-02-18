@@ -5,7 +5,7 @@
 #ifndef GTestStats_DEFINED
 #define GTestStats_DEFINED
 
-#include "GTypes.h"
+#include "../include/GTypes.h"
 
 extern bool gTestSuite_Verbose;
 extern bool gTestSuite_CrashOnFailure;

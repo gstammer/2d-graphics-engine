@@ -2,7 +2,7 @@
  *  Copyright 2018 Mike Reed
  */
 
-#include "GBitmap.h"
+#include "../include/GBitmap.h"
 #include "lodepng.h"
 
 static void convertToPNG(const GPixel src[], int width, uint8_t dst[]) {
@@ -83,7 +83,7 @@ bool GBitmap::readFromFile(const char path[]) {
     }
     free(pix);
 
-    this->computeIsOpaque();
+    this->setIsOpaque(kCompute_IsOpaque);
     return true;
 }
 

@@ -19,7 +19,7 @@ static bool is_arg(const char arg[], const char target[]) {
     return !strcmp(arg, buffer);
 }
 
-int main(int argc, char** argv) {
+int main_tests(int argc, const char* argv[]) {
     const char* report = NULL;
     const char* author = NULL;
     FILE* reportFile = NULL;
