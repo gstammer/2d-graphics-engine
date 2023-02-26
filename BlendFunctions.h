@@ -182,9 +182,28 @@ GPixel blendSrcATop(GPixel srcPixel, GPixel destPixel) {
     
     // src atop operation:
     // Da*S + (1 - Sa)*D
-    // srcin + dstout
+    // Div255(Da * S) + Div255((255 - Sa) * D)
+    // Div255(Da * S + (255 - Sa) * D)
 
-    return blendSrcIn(srcPixel, destPixel) + blendDstOut(srcPixel, destPixel);
+    // extract color from both pixels
+    int dR = GPixel_GetR(destPixel);
+    int dG = GPixel_GetG(destPixel);
+    int dB = GPixel_GetB(destPixel);
+    int dA = GPixel_GetA(destPixel);
+
+    int sR = GPixel_GetR(srcPixel);
+    int sG = GPixel_GetG(srcPixel);
+    int sB = GPixel_GetB(srcPixel);
+    int sA = GPixel_GetA(srcPixel);
+
+    int dCoef = 255 - sA;
+    int newR = Div255(dA * sR + dCoef * dR);
+    int newG = Div255(dA * sG + dCoef * dG);
+    int newB = Div255(dA * sB + dCoef * dB);
+    int newA = Div255(dA * sA + dCoef * dA);
+
+    GPixel outPixel = GPixel_PackARGB(newA, newR, newG, newB);
+    return outPixel;
 }
 
 // Takes 2 GPixels & blends into 1 GPixel w/ dstatop
@@ -192,9 +211,28 @@ GPixel blendDstATop(GPixel srcPixel, GPixel destPixel) {
     
     // src atop operation:
     // Sa*D + (1 - Da)*S
-    // dstin + srcout
+    // Div255(Sa * D) + Div255((255 - Da) * S)
+    // Div255(Sa * D + (255 - Da) * S)
 
-    return blendDstIn(srcPixel, destPixel) + blendSrcOut(srcPixel, destPixel);
+    // extract color from both pixels
+    int dR = GPixel_GetR(destPixel);
+    int dG = GPixel_GetG(destPixel);
+    int dB = GPixel_GetB(destPixel);
+    int dA = GPixel_GetA(destPixel);
+
+    int sR = GPixel_GetR(srcPixel);
+    int sG = GPixel_GetG(srcPixel);
+    int sB = GPixel_GetB(srcPixel);
+    int sA = GPixel_GetA(srcPixel);
+
+    int sCoef = 255 - dA;
+    int newR = Div255(sA * dR + sCoef * sR);
+    int newG = Div255(sA * dG + sCoef * sG);
+    int newB = Div255(sA * dB + sCoef * sB);
+    int newA = Div255(sA * dA + sCoef * sA);
+
+    GPixel outPixel = GPixel_PackARGB(newA, newR, newG, newB);
+    return outPixel;
 }
 
 // Takes 2 GPixels & blends into 1 GPixel w/ xor
@@ -202,9 +240,29 @@ GPixel blendXor(GPixel srcPixel, GPixel destPixel) {
     
     // xor operation:
     // (1 - Sa)*D + (1 - Da)*S
-    // srcout + dstout
+    // Div255((255 - Sa) * D) + Div255((255 - Da) * S)
+    // Div255((255 - Sa) * D + (255 - Da) * S)
 
-    return blendSrcOut(srcPixel, destPixel) + blendDstOut(srcPixel, destPixel);
+    // extract color from both pixels
+    int dR = GPixel_GetR(destPixel);
+    int dG = GPixel_GetG(destPixel);
+    int dB = GPixel_GetB(destPixel);
+    int dA = GPixel_GetA(destPixel);
+
+    int sR = GPixel_GetR(srcPixel);
+    int sG = GPixel_GetG(srcPixel);
+    int sB = GPixel_GetB(srcPixel);
+    int sA = GPixel_GetA(srcPixel);
+
+    int sCoef = 255 - dA;
+    int dCoef = 255 - sA;
+    int newR = Div255(dCoef * dR + sCoef * sR);
+    int newG = Div255(dCoef * dG + sCoef * sG);
+    int newB = Div255(dCoef * dB + sCoef * sB);
+    int newA = Div255(dCoef * dA + sCoef * sA);
+
+    GPixel outPixel = GPixel_PackARGB(newA, newR, newG, newB);
+    return outPixel;
 }
 
 #endif

@@ -2,13 +2,14 @@
  *  Copyright 2015 Mike Reed
  */
 
-#include "GWindow.h"
 #include "../include/GBitmap.h"
 #include "../include/GCanvas.h"
 #include "../include/GColor.h"
+#include "../include/GMatrix.h"
 #include "../include/GRandom.h"
 #include "../include/GRect.h"
-
+#include "../include/GShader.h"
+#include "GWindow.h"
 #include <vector>
 
 static const float CORNER_SIZE = 9;
@@ -25,21 +26,23 @@ template <typename T> int find_index(const std::vector<T*>& list, T* target) {
 static GRandom gRand;
 
 static GColor rand_color() {
-    return GColor::RGBA(gRand.nextF(), gRand.nextF(), gRand.nextF(), 0.5f);
+    return {gRand.nextF(), gRand.nextF(), gRand.nextF(), 0.5};
 }
 
 static GRect make_from_pts(const GPoint& p0, const GPoint& p1) {
     return GRect::LTRB(std::min(p0.fX, p1.fX), std::min(p0.fY, p1.fY),
-                       std::max(p0.fX, p1.fX), std::max(p0.fY, p1.fY));
+                           std::max(p0.fX, p1.fX), std::max(p0.fY, p1.fY));
 }
 
-static bool contains(const GRect& rect, float x, float y) {
+static bool contains(const GRect& rect, GPoint p) {
+    auto x = p.fX;
+    auto y = p.fY;
     return rect.left() < x && x < rect.right() && rect.top() < y && y < rect.bottom();
 }
 
 static GRect offset(const GRect& rect, float dx, float dy) {
     return GRect::LTRB(rect.left() + dx, rect.top() + dy,
-                       rect.right() + dx, rect.bottom() + dy);
+                           rect.right() + dx, rect.bottom() + dy);
 }
 
 static bool hit_test(float x0, float y0, float x1, float y1) {
@@ -48,18 +51,21 @@ static bool hit_test(float x0, float y0, float x1, float y1) {
     return std::max(dx, dy) <= CORNER_SIZE;
 }
 
-static bool in_resize_corner(const GRect& r, float x, float y, GPoint* anchor) {
+static bool in_resize_corner(const GRect& r, GPoint p, GPoint* anchor) {
+    auto x = p.fX;
+    auto y = p.fY;
+    
     if (hit_test(r.left(), r.top(), x, y)) {
-        *anchor = { r.right(), r.bottom() };
+        *anchor = {r.right(), r.bottom()};
         return true;
     } else if (hit_test(r.right(), r.top(), x, y)) {
-        *anchor = { r.left(), r.bottom() };
+        *anchor = {r.left(), r.bottom()};
         return true;
     } else if (hit_test(r.right(), r.bottom(), x, y)) {
-        *anchor = { r.left(), r.top() };
+        *anchor = {r.left(), r.top()};
         return true;
     } else if (hit_test(r.left(), r.bottom(), x, y)) {
-        *anchor = { r.right(), r.top() };
+        *anchor = {r.right(), r.top()};
         return true;
     }
     return false;
@@ -72,7 +78,7 @@ static void draw_corner(GCanvas* canvas, const GColor& c, float x, float y, floa
 
 static void draw_hilite(GCanvas* canvas, const GRect& r) {
     const float size = CORNER_SIZE;
-    GColor c = GColor::RGB(0, 0, 0);
+    GColor c = {0, 0, 0, 1};
     draw_corner(canvas, c, r.fLeft, r.fTop, size, size);
     draw_corner(canvas, c, r.fLeft, r.fBottom, size, -size);
     draw_corner(canvas, c, r.fRight, r.fTop, -size, size);
@@ -80,10 +86,10 @@ static void draw_hilite(GCanvas* canvas, const GRect& r) {
 }
 
 static void constrain_color(GColor* c) {
+    c->a = std::max(std::min(c->a, 1.f), 0.1f);
     c->r = std::max(std::min(c->r, 1.f), 0.f);
     c->g = std::max(std::min(c->g, 1.f), 0.f);
     c->b = std::max(std::min(c->b, 1.f), 0.f);
-    c->a = std::max(std::min(c->a, 1.f), 0.1f);
 }
 
 class Shape {
@@ -102,18 +108,48 @@ public:
         fRect = GRect::XYWH(0, 0, 0, 0);
     }
 
-    virtual void draw(GCanvas* canvas) {
+    void draw(GCanvas* canvas) override {
         canvas->drawRect(fRect, fColor);
     }
 
-    virtual GRect getRect() { return fRect; }
-    virtual void setRect(const GRect& r) { fRect = r; }
-    virtual GColor getColor() { return fColor; }
-    virtual void setColor(const GColor& c) { fColor = c; }
+    GRect getRect() override { return fRect; }
+    void setRect(const GRect& r) override { fRect = r; }
+    GColor getColor() override { return fColor; }
+    void setColor(const GColor& c) override { fColor = c; }
 
 private:
     GRect   fRect;
     GColor  fColor;
+};
+
+class BitmapShape : public Shape {
+public:
+    BitmapShape(const GBitmap& bm) : fBM(bm) {
+        fRect = GRect::XYWH(20, 20, 150, 150);
+    }
+
+    void draw(GCanvas* canvas) override {
+        GPaint paint;
+        auto sh = GCreateBitmapShader(fBM, GMatrix());
+        paint.setShader(sh.get());
+
+        canvas->save();
+        canvas->translate(fRect.left(), fRect.top());
+        canvas->scale(fRect.width() / fBM.width(),
+                      fRect.height() / fBM.height());
+        canvas->drawRect(GRect::WH(fBM.width(), fBM.height()), paint);
+        canvas->restore();
+    }
+
+    GRect getRect() override { return fRect; }
+    void setRect(const GRect& r) override { fRect = r; }
+    GColor getColor() override { return fColor; }
+    void setColor(const GColor& c) override { fColor = c; }
+
+private:
+    GRect   fRect;
+    GColor  fColor = { 1, 0, 0, 0 };
+    GBitmap fBM;
 };
 
 static void make_regular_poly(GPoint pts[], int count, float cx, float cy, float rx, float ry) {
@@ -156,21 +192,49 @@ private:
 };
 
 static Shape* cons_up_shape(unsigned index) {
-    if (index == 0) {
+    const char* names[] = {
+        "apps/spock.png", "apps/wheel.png",
+    };
+    if (index < GARRAY_COUNT(names)) {
+        GBitmap bm;
+        if (bm.readFromFile(names[index])) {
+            return new BitmapShape(bm);
+        }
+    }
+    if (index == 2) {
         int n = (int)(3 + gRand.nextF() * 12);
         return new ConvexShape(rand_color(), n);
     }
     return nullptr;
 }
 
+constexpr float DELTA_ROTATE = M_PI / 30;
+constexpr float DELTA_SCALE = 1.125f;
+
 class TestWindow : public GWindow {
     std::vector<Shape*> fList;
     Shape* fShape;
     GColor fBGColor;
 
+    float fRotate = 0;
+    float fScale = 1;
+
+    GMatrix makeMatrix() const {
+        const float cx = this->width() * 0.5f;
+        const float cy = this->height() * 0.5f;
+        return GMatrix::Translate(cx, cy)
+             * GMatrix::Rotate(fRotate)
+             * GMatrix::Scale(fScale, fScale)
+             * GMatrix::Translate(-cx, -cy);
+    }
+    
+    GMatrix makeInverse() const {
+        return this->makeMatrix().inverseOrI();
+    }
+
 public:
     TestWindow(int w, int h) : GWindow(w, h) {
-        fBGColor = GColor::RGB(1, 1, 1);
+        fBGColor = {1, 1, 1, 1};
         fShape = NULL;
     }
 
@@ -180,12 +244,17 @@ protected:
     void onDraw(GCanvas* canvas) override {
         canvas->drawRect(GRect::XYWH(0, 0, 10000, 10000), fBGColor);
 
+        canvas->save();
+        canvas->concat(this->makeMatrix());
+
         for (int i = 0; i < fList.size(); ++i) {
             fList[i]->draw(canvas);
         }
         if (fShape) {
             draw_hilite(canvas, fShape->getRect());
         }
+        
+        canvas->restore();
     }
 
     bool onKeyPress(uint32_t sym) override {
@@ -199,6 +268,14 @@ protected:
             }
         }
 
+        switch (sym) {
+            case '[': fRotate -= DELTA_ROTATE; this->requestDraw(); return true;
+            case ']': fRotate += DELTA_ROTATE; this->requestDraw(); return true;
+            case '-': fScale /= DELTA_SCALE;   this->requestDraw(); return true;
+            case '=': fScale *= DELTA_SCALE;   this->requestDraw(); return true;
+            default: break;
+        }
+        
         if (fShape) {
             switch (sym) {
                 case SDLK_UP: {
@@ -258,11 +335,13 @@ protected:
     }
 
     GClick* onFindClickHandler(GPoint loc) override {
+        auto inverse = this->makeInverse();
+
         if (fShape) {
             GPoint anchor;
-            if (in_resize_corner(fShape->getRect(), loc.x(), loc.y(), &anchor)) {
-                return new GClick(loc, [this, anchor](GClick* click) {
-                    fShape->setRect(make_from_pts(click->curr(), anchor));
+            if (in_resize_corner(fShape->getRect(), inverse * loc, &anchor)) {
+                return new GClick(loc, [this, anchor, inverse](GClick* click) {
+                    fShape->setRect(make_from_pts(inverse * click->curr(), anchor));
                     this->updateTitle();
                     this->requestDraw();
                 });
@@ -270,12 +349,12 @@ protected:
         }
 
         for (int i = fList.size() - 1; i >= 0; --i) {
-            if (contains(fList[i]->getRect(), loc.x(), loc.y())) {
+            if (contains(fList[i]->getRect(), inverse * loc)) {
                 fShape = fList[i];
                 this->updateTitle();
-                return new GClick(loc, [this](GClick* click) {
-                    const GPoint curr = click->curr();
-                    const GPoint prev = click->prev();
+                return new GClick(loc, [this, inverse](GClick* click) {
+                    const GPoint curr = inverse * click->curr();
+                    const GPoint prev = inverse * click->prev();
                     fShape->setRect(offset(fShape->getRect(), curr.x() - prev.x(), curr.y() - prev.y()));
                     this->updateTitle();
                     this->requestDraw();
@@ -287,7 +366,7 @@ protected:
         fShape = new RectShape(rand_color());
         fList.push_back(fShape);
         this->updateTitle();
-        return new GClick(loc, [this](GClick* click) {
+        return new GClick(loc, [this, inverse](GClick* click) {
             if (fShape && GClick::kUp_State == click->state()) {
                 if (fShape->getRect().isEmpty()) {
                     this->removeShape(fShape);
@@ -295,7 +374,7 @@ protected:
                     return;
                 }
             }
-            fShape->setRect(make_from_pts(click->orig(), click->curr()));
+            fShape->setRect(make_from_pts(inverse * click->orig(), inverse * click->curr()));
             this->updateTitle();
             this->requestDraw();
         });

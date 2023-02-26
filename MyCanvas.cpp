@@ -6,12 +6,13 @@
 #include "include/GRect.h"
 #include "include/GColor.h"
 #include "include/GBitmap.h"
+#include "include/GShader.h"
 
 #include "BlendFunctions.h"
 #include "Edge.h"
 #include <iostream>
-// #include <vector>
 #include <algorithm>
+#include <stack>
 
 // Helper functions below!
 
@@ -115,6 +116,39 @@ bool compareEdges(Edge& e1, Edge& e2) {
     return (e1.yTop < e2.yTop);
 }
 
+GBlendMode optimizeMode(GShader* shaderPtr, GBlendMode mode, float alpha) {
+    // optimize when alpha is 0
+    if (shaderPtr==nullptr && alpha == 0) {
+        if (mode == GBlendMode::kSrcIn || mode == GBlendMode::kDstIn ||
+            mode == GBlendMode::kSrcOut || mode == GBlendMode::kDstATop) {
+                mode = GBlendMode::kClear;
+            }
+    }
+
+    // optimize when alpha is 1
+    if (shaderPtr==nullptr && alpha == 1) {
+        if (mode == GBlendMode::kSrcOver) mode = GBlendMode::kSrc;
+        if (mode == GBlendMode::kDstIn) mode = GBlendMode::kDst;
+        if (mode == GBlendMode::kDstOut) mode = GBlendMode::kClear;
+        if (mode == GBlendMode::kSrcATop) mode = GBlendMode::kSrcIn;
+        if (mode == GBlendMode::kDstATop) mode = GBlendMode::kDstOver;
+        if (mode == GBlendMode::kXor) mode = GBlendMode::kSrcOut;
+    }
+
+    // optimize when shader is opaque
+    if (shaderPtr!=nullptr && shaderPtr->isOpaque()) {
+        if (mode == GBlendMode::kSrcOver) mode = GBlendMode::kSrc;
+        if (mode == GBlendMode::kDstIn) mode = GBlendMode::kDst;
+        if (mode == GBlendMode::kDstOut) mode = GBlendMode::kClear;
+        if (mode == GBlendMode::kSrcATop) mode = GBlendMode::kSrcIn;
+        if (mode == GBlendMode::kDstATop) mode = GBlendMode::kDstOver;
+        if (mode == GBlendMode::kXor) mode = GBlendMode::kSrcOut;
+    }
+
+    return mode;
+}
+
+
 // prints Edge array for debugging
 void printEdgeArray(Edge* edgesArrayPtr, int count) {
     for (int i = 0; i < count; i++) {
@@ -123,13 +157,71 @@ void printEdgeArray(Edge* edgesArrayPtr, int count) {
     }
 }
 
+// prints array of GPoints for debugging
+void printPoints(GPoint pts[], int count) {
+    printf("New points:\n");
+    for (int i = 0; i < count; i++) {
+        printf("%f, %f   ", pts[i].fX, pts[i].fY);
+    }
+    printf("\n");
+}
+
 
 class MyCanvas : public GCanvas {
 public:
     MyCanvas(const GBitmap& device) : fDevice(device) {}
 
+    // stores current transformation matrices (CTMs) in a stack
+    std::stack<GMatrix> mxStack;
+    // the CTM can then be referenced via mxStack.top()
+
+    /**
+     *  Save off a copy of the canvas state (CTM), to be later used if the balancing call to
+     *  restore() is made. Calls to save/restore can be nested:
+     *  save();
+     *      save();
+     *          concat(...);    // this modifies the CTM
+     *          .. draw         // these are drawn with the modified CTM
+     *      restore();          // now the CTM is as it was when the 2nd save() call was made
+     *      ..
+     *  restore();              // now the CTM is as it was when the 1st save() call was made
+     */
+    void save() {
+        if (mxStack.empty()) {
+            GMatrix id = GMatrix();
+            mxStack.push(id);
+        }
+        GMatrix mx = GMatrix(mxStack.top());
+        mxStack.push(mx);
+    }
+
+    /**
+     *  Copy the canvas state (CTM) that was record in the correspnding call to save() back into
+     *  the canvas. It is an error to call restore() if there has been no previous call to save().
+     */
+    void restore() {
+        mxStack.pop();
+    }
+
+    /**
+     *  Modifies the CTM by preconcatenating the specified matrix with the CTM. The canvas
+     *  is constructed with an identity CTM.
+     *
+     *  CTM' = CTM * matrix
+     */
+    void concat(const GMatrix& matrix) {
+        if (mxStack.empty()) {
+            GMatrix id = GMatrix();
+            mxStack.push(id);
+        }
+        GMatrix newMatrix = GMatrix::Concat(mxStack.top(), matrix);
+        mxStack.pop();
+        mxStack.push(newMatrix);
+    }
+
     /**
      *  Template to loop thru rows & replace each pixel with a new blended pixel
+     *  with no shader
      *  For filling entire device screen, rectPtr is nullptr
      */
     template <typename Method>
@@ -149,7 +241,7 @@ public:
             }
             return;
         }
-        
+
         GIRect rect = *rectPtr;
         // otherwise, loop thru rows of rectangle
         for (int y = rect.fTop; y < rect.fBottom; y++) {
@@ -162,19 +254,50 @@ public:
     }
 
     /**
+     *  Template to loop thru rows & replace each pixel with a new blended pixel
+     *  and using the specified shader
+     *  For filling entire device screen, rectPtr is nullptr
+     */
+    template <typename Method>
+    void drawRowsShader(GShader* shaderPtr, GIRect* rectPtr, Method bl) {
+        GIRect rect;
+        // if no rect, make rect of full device screen
+        if (rectPtr == nullptr) {
+            rect = {0, 0, fDevice.width(), fDevice.height()};
+        }
+        else rect = *rectPtr;
+
+        int startX = rect.fLeft;
+        int count = rect.fRight - startX;
+        GPixel src[count];
+
+        // loop thru rows of rectangle
+        for (int y = rect.fTop; y < rect.fBottom; y++) {
+            shaderPtr->shadeRow(startX, y, count, src);
+            for (int x = rect.fLeft; x < rect.fRight; x++) {
+                GPixel* dstPtr = get_pixel_addr(fDevice, x, y);
+                GPixel blendedPixel = bl(src[x - startX], *dstPtr);
+                *dstPtr = blendedPixel;
+            }
+        }
+    }
+
+    /**
      *  Helper function that handles the switch case for choosing a blend mode
      *  & then calls drawRows to draw
      */
-    void blendAndDraw(GBlendMode mode, GPixel src, GIRect* rectPtr) {
+    void blendAndDraw(GBlendMode mode, GShader* shader, GPixel src, GIRect* rectPtr) {
         switch (mode) {
             case GBlendMode::kClear:
                 {
-                    drawRows(src, rectPtr, blendClear);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendClear);
+                    else drawRowsShader(shader, rectPtr, blendClear);
                 }
                 break;
             case GBlendMode::kSrc:
                 {
-                    drawRows(src, rectPtr, blendSrc);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendSrc);
+                    else drawRowsShader(shader, rectPtr, blendSrc);
                 }
                 break;
             case GBlendMode::kDst:
@@ -182,47 +305,56 @@ public:
                 break;
             case GBlendMode::kSrcOver:
                 {
-                    drawRows(src, rectPtr, blendSrcOver);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendSrcOver);
+                    else drawRowsShader(shader, rectPtr, blendSrcOver);
                 }
                 break;
             case GBlendMode::kDstOver:
                 {
-                    drawRows(src, rectPtr, blendDstOver);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendDstOver);
+                    else drawRowsShader(shader, rectPtr, blendDstOver);
                 }
                 break;
             case GBlendMode::kSrcIn:
                 {
-                    drawRows(src, rectPtr, blendSrcIn);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendSrcIn);
+                    else drawRowsShader(shader, rectPtr, blendSrcIn);
                 }
                 break;
             case GBlendMode::kDstIn:
                 {
-                    drawRows(src, rectPtr, blendDstIn);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendDstIn);
+                    else drawRowsShader(shader, rectPtr, blendDstIn);
                 }
                 break;
             case GBlendMode::kSrcOut:
                 {
-                    drawRows(src, rectPtr, blendSrcOut);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendSrcOut);
+                    else drawRowsShader(shader, rectPtr, blendSrcOut);
                 }
                 break;
             case GBlendMode::kDstOut:
                 {
-                    drawRows(src, rectPtr, blendDstOut);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendDstOut);
+                    else drawRowsShader(shader, rectPtr, blendDstOut);
                 }
                 break;
             case GBlendMode::kSrcATop:
                 {
-                    drawRows(src, rectPtr, blendSrcATop);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendSrcATop);
+                    else drawRowsShader(shader, rectPtr, blendSrcATop);
                 }
                 break;
             case GBlendMode::kDstATop:
                 {
-                    drawRows(src, rectPtr, blendDstATop);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendDstATop);
+                    else drawRowsShader(shader, rectPtr, blendDstATop);
                 }
                 break;
             case GBlendMode::kXor:
                 {
-                    drawRows(src, rectPtr, blendXor);
+                    if (shader == nullptr) drawRows(src, rectPtr, blendXor);
+                    else drawRowsShader(shader, rectPtr, blendXor);
                 }
                 break;
         }
@@ -232,33 +364,33 @@ public:
      *  Fill the entire canvas with the specified color, using the specified blendmode.
      */
     void drawPaint(const GPaint& paint) {
-        
+        // set up CTM
+        if (mxStack.empty()) {
+            GMatrix id = GMatrix();
+            mxStack.push(id);
+        }
+        GMatrix CTM = mxStack.top();
+
+        // if there is a shader, set context
+        GShader* shaderPtr = paint.getShader();
+        if (shaderPtr != nullptr) {
+            bool sh = shaderPtr->setContext(CTM);
+            if (!sh) return;
+        }
+
         // establish pixel & blend mode to paint with
         GPixel newPixel = ColorToPixel(paint.getColor());
         GBlendMode mode = paint.getBlendMode();
 
-        // optimize when alpha is 0
-        if (paint.getAlpha() == 0) {
+        // optimize based on modes & opacity
+        if (shaderPtr==nullptr && paint.getAlpha() == 0) {
             if (mode == GBlendMode::kSrcOver || mode == GBlendMode::kDstOver ||
                 mode == GBlendMode::kDstOut || mode == GBlendMode::kSrcATop) return;
-            if (mode == GBlendMode::kSrcIn || mode == GBlendMode::kDstIn ||
-                mode == GBlendMode::kSrcOut || mode == GBlendMode::kDstATop) {
-                    mode = GBlendMode::kClear;
-                }
         }
-
-        // optimize when alpha is 1
-        if (paint.getAlpha() == 1) {
-            if (mode == GBlendMode::kSrcOver) mode = GBlendMode::kSrc;
-            if (mode == GBlendMode::kDstIn) mode = GBlendMode::kDst;
-            if (mode == GBlendMode::kDstOut) mode = GBlendMode::kClear;
-            if (mode == GBlendMode::kSrcATop) mode = GBlendMode::kSrcIn;
-            if (mode == GBlendMode::kDstATop) mode = GBlendMode::kDstOver;
-            if (mode == GBlendMode::kXor) mode = GBlendMode::kSrcOut;
-        }
+        mode = optimizeMode(shaderPtr, mode, paint.getAlpha());
 
         // loop thru canvas based on which blend mode is being used
-        blendAndDraw(mode, newPixel, nullptr);
+        blendAndDraw(mode, shaderPtr, newPixel, nullptr);
 
     }
     
@@ -269,13 +401,43 @@ public:
      *      e.g. contained == center > min_edge && center <= max_edge
      */
     void drawRect(const GRect& rect, const GPaint& paint) {
-        
-        // establish pixel & blend mode to paint with
-        GPixel srcPixel = ColorToPixel(paint.getColor());
-        GBlendMode mode = paint.getBlendMode();
+        // set up CTM
+        if (mxStack.empty()) {
+            GMatrix id = GMatrix();
+            mxStack.push(id);
+        }
+        GMatrix CTM = mxStack.top();
+
+        // if there is a shader, set context
+        GShader* shaderPtr = paint.getShader();
+        if (shaderPtr != nullptr) {
+            bool sh = shaderPtr->setContext(CTM);
+            if (!sh) return;
+        }
+
+        // map points based on CTM
+        GPoint cornerPts[4] = {{rect.fLeft, rect.fTop}, {rect.fRight, rect.fTop},
+                                {rect.fRight, rect.fBottom}, {rect.fLeft, rect.fBottom}, };
+        GPoint newCornerPts[4];
+        CTM.mapPoints(newCornerPts, cornerPts, 4);
+
+        // if the rectangle has been rotated, treat it as a polygon instead
+        bool isRotated = newCornerPts[0].fY != newCornerPts[1].fY;
+        if (isRotated) {
+            drawConvexPolygon(cornerPts, 4, paint);
+            return;
+        }
+
+        // if it wasn't rotated, continue by making the transformed rect
+        GRect newRect = {newCornerPts[0].fX, newCornerPts[0].fY,
+                        newCornerPts[2].fX, newCornerPts[2].fY};
 
         // round rectangle into GIRect
-        GIRect roundedRect = rect.round();
+        GIRect roundedRect = newRect.round();
+        
+        // establish pixel & blend mode & shader to paint with
+        GPixel srcPixel = ColorToPixel(paint.getColor());
+        GBlendMode mode = paint.getBlendMode();
 
         // clip areas that are outside canvas
         int canvasX = fDevice.width();
@@ -289,27 +451,14 @@ public:
         if (roundedRect.fLeft >= roundedRect.fRight) return;
         if (roundedRect.fTop >= roundedRect.fBottom) return;
         
-        // optimize when alpha is 0
-        if (paint.getAlpha() == 0) {
+        // optimize based on modes & opacity
+        if (shaderPtr==nullptr && paint.getAlpha() == 0) {
             if (mode == GBlendMode::kSrcOver || mode == GBlendMode::kDstOver ||
                 mode == GBlendMode::kDstOut || mode == GBlendMode::kSrcATop) return;
-            if (mode == GBlendMode::kSrcIn || mode == GBlendMode::kDstIn ||
-                mode == GBlendMode::kSrcOut || mode == GBlendMode::kDstATop) {
-                    mode = GBlendMode::kClear;
-                }
         }
+        mode = optimizeMode(shaderPtr, mode, paint.getAlpha());
 
-        // optimize when alpha is 1
-        if (paint.getAlpha() == 1) {
-            if (mode == GBlendMode::kSrcOver) mode = GBlendMode::kSrc;
-            if (mode == GBlendMode::kDstIn) mode = GBlendMode::kDst;
-            if (mode == GBlendMode::kDstOut) mode = GBlendMode::kClear;
-            if (mode == GBlendMode::kSrcATop) mode = GBlendMode::kSrcIn;
-            if (mode == GBlendMode::kDstATop) mode = GBlendMode::kDstOver;
-            if (mode == GBlendMode::kXor) mode = GBlendMode::kSrcOut;
-        }
-
-        blendAndDraw(mode, srcPixel, &roundedRect);
+        blendAndDraw(mode, shaderPtr, srcPixel, &roundedRect);
     }
 
     /**
@@ -317,40 +466,45 @@ public:
      *  following the same "containment" rule as rectangles.
      */
     void drawConvexPolygon(const GPoint points[], int count, const GPaint& paint) {
-        
+
         if (count <= 2) return;
         
-        // // get paint info
+        // set up CTM
+        if (mxStack.empty()) {
+            GMatrix id = GMatrix();
+            mxStack.push(id);
+        }
+        GMatrix CTM = mxStack.top();
+
+        // if there is a shader, set context
+        GShader* shaderPtr = paint.getShader();
+        if (shaderPtr != nullptr) {
+            bool sh = shaderPtr->setContext(CTM);
+            if (!sh) return;
+        }
+
+        // map points based on CTM
+        GPoint newPts[count];
+        CTM.mapPoints(newPts, points, count);
+
+        // get paint info
         GPixel srcPixel = ColorToPixel(paint.getColor());
         GBlendMode mode = paint.getBlendMode();
-
-        // optimize when alpha is 0
-        if (paint.getAlpha() == 0) {
+        
+        // optimize based on modes & opacity
+        if (shaderPtr==nullptr && paint.getAlpha() == 0) {
             if (mode == GBlendMode::kSrcOver || mode == GBlendMode::kDstOver ||
                 mode == GBlendMode::kDstOut || mode == GBlendMode::kSrcATop) return;
-            if (mode == GBlendMode::kSrcIn || mode == GBlendMode::kDstIn ||
-                mode == GBlendMode::kSrcOut || mode == GBlendMode::kDstATop) {
-                    mode = GBlendMode::kClear;
-                }
         }
-
-        // optimize when alpha is 1
-        if (paint.getAlpha() == 1) {
-            if (mode == GBlendMode::kSrcOver) mode = GBlendMode::kSrc;
-            if (mode == GBlendMode::kDstIn) mode = GBlendMode::kDst;
-            if (mode == GBlendMode::kDstOut) mode = GBlendMode::kClear;
-            if (mode == GBlendMode::kSrcATop) mode = GBlendMode::kSrcIn;
-            if (mode == GBlendMode::kDstATop) mode = GBlendMode::kDstOver;
-            if (mode == GBlendMode::kXor) mode = GBlendMode::kSrcOut;
-        }
+        mode = optimizeMode(shaderPtr, mode, paint.getAlpha());
 
         // contruct all edges
         Edge allEdges[count];
         for (int i = 0; i < count - 1; i++) {
-            allEdges[i] = Edge(points[i], points[i+1]);
+            allEdges[i] = Edge(newPts[i], newPts[i+1]);
         }
         // add last edge
-        allEdges[count - 1] = Edge(points[count - 1], points[0]);
+        allEdges[count - 1] = Edge(newPts[count - 1], newPts[0]);
 
         // do clipping function to get new list of edges
         Edge edgesArrayPtr[count*3];
@@ -374,7 +528,7 @@ public:
             // draw each row using drawRect w/ height 1
             if (xStart != xEnd) {
                 GIRect rowRect = {xStart, y, xEnd, y+1};
-                blendAndDraw(mode, srcPixel, &rowRect);
+                blendAndDraw(mode, shaderPtr, srcPixel, &rowRect);
             }
 
             // when y passes yBottom of an edge, swap it w/ next highest edge
@@ -400,48 +554,100 @@ std::unique_ptr<GCanvas> GCreateCanvas(const GBitmap& device) {
     return std::unique_ptr<GCanvas>(new MyCanvas(device));
 }
 
+
+
+class WaveShader : public GShader {
+    const GMatrix fLocalMatrix;
+    const float fScale;
+    const float fWaveDepth;
+
+    GMatrix fInverse;
+    
+public:
+    WaveShader(float scale, float depth)
+        : fLocalMatrix(GMatrix()), fScale(scale), fWaveDepth(depth)
+    {}
+    
+    bool isOpaque() override {
+        return true;
+    }
+    
+    bool setContext(const GMatrix& ctm) override {
+        return (ctm * fLocalMatrix).invert(&fInverse);
+    }
+    
+    void shadeRow(int x, int y, int count, GPixel row[]) override {
+        GColor color;
+        for (int i = 0; i < count; ++i) {
+            float newY = y + (float)sin(fScale * i) * fWaveDepth;
+            float rad = fScale * newY / M_PI;
+            color = {abs((float)sin(rad)), 1, 0, 1};
+            row[i] = ColorToPixel(color);
+        }
+    }
+};
+
 /* my own drawing, using functions like this: canvas->func()
  * returning title of the artwork
  * dimensions are 256 x 256
  */
 std::string GDrawSomething(GCanvas* canvas, GISize dim) {
+    
+    canvas->save();
+    WaveShader waveSh = WaveShader(0.3, 7);
+    GPaint bgPaint;
+    bgPaint.setShader(&waveSh);
+    GRect full = {0, 0, 256, 256};
+    canvas->drawRect(full, bgPaint);
 
-    GColor color = {0.1, 0, 0, 1};
-    GPaint bckgd = GPaint(color);
-    bckgd.setBlendMode(GBlendMode::kSrc);
-    canvas->drawPaint(bckgd);
+    canvas->restore();
 
-    float distDelta = 0.2;
-    float timesAround = 20;
-    float xCenter = 255/2;
-    float yCenter = 255/2;
+    GBitmap bm;
+    bm.readFromFile("mypngs/spongebob.png");
+    float cx = bm.width() * 0.5f;
+    float cy = bm.height() * 0.5f;
+    GPoint pts[] = {
+        { cx, 0 }, { 0, cy }, { cx, bm.height()*1.0f }, { bm.width()*1.0f, cy },
+    };
 
-    // red->yellow spiral
-    float dist = 0;
-    color = {1, 0, 0, 0};
-    GPaint paint = GPaint(color);
-    paint.setBlendMode(GBlendMode::kSrcOver);
+    auto shader = GCreateBitmapShader(bm, GMatrix());
+    GPaint paint(shader.get());
 
-    // red->yellow spiral
-    dist = 0;
-    color = {1, 0, 0, 0.2};
-    paint.setColor(color);
-    paint.setBlendMode(GBlendMode::kSrcOver);
-    for (int angle = 360 * timesAround; angle > 0; angle -= 5) {
-        float x = xCenter + cos(M_PI * angle/180) * dist;
-        float y = yCenter + sin(M_PI * angle/180) * dist;
-        // GRect newRect = {x-8, y-8, x+8, y+8};
-        // canvas->drawRect(newRect, paint);
-        GPoint shape[3] = {{xCenter, yCenter}, {x, y}, {x + 10, y + 10}};
-        canvas->drawConvexPolygon(shape, 3, paint);
-        dist += distDelta;
-        // increase opacity
-        color.a = 2 * angle / (3600 * timesAround);
-        // shift hue
-        color.g = angle / (360 * timesAround);
-        paint.setColor(color);
+    GPoint midpts[] = {{0, 0}, {0, bm.height()}, {bm.width(), bm.height()}, {bm.width(), 0}};
+    canvas->save();
+    canvas->translate(90, 90);
+    canvas->scale(0.1f, 0.1f);
+    canvas->drawConvexPolygon(midpts, 4, paint);
+    canvas->restore();
+
+    canvas->save();
+    int n = 17;
+    canvas->scale(0.1f, 0.1f);
+    for (int i = 0; i < n; ++i) {
+        float radians = i * M_PI * 2 / n;
+        canvas->save();
+        canvas->translate(cx*3, cx*3);
+        canvas->rotate(radians);
+        canvas->translate(cx, -cy);
+        canvas->drawConvexPolygon(pts, 4, paint);
+        canvas->restore();
     }
+    canvas->restore();
 
-    return "sunny";
+    canvas->save();
+    n = 7;
+    canvas->scale(0.1f, 0.1f);
+    for (int i = 0; i < n; ++i) {
+        float radians = i * M_PI * 2 / n;
+        canvas->save();
+        canvas->translate(cx*3, cx*3);
+        canvas->rotate(radians);
+        // canvas->translate(cx, -cy);
+        canvas->drawConvexPolygon(pts, 4, paint);
+        canvas->restore();
+    }
+    canvas->restore();
+
+    return "me";
 }
 
